@@ -199,11 +199,9 @@ class GoogleTagService
         return json_encode($result);
     }
 
-    public function getCartData(int $cartId, $addressCountry): string
+    public function getCartData(?int $cartId, $addressCountry): string
     {
-        $cart = CartQuery::create()->findPk($cartId);
-
-        if (!$cart) {
+        if (!$cartId || !$cart = CartQuery::create()->findPk($cartId)) {
             return json_encode([]);
         }
 
@@ -221,11 +219,9 @@ class GoogleTagService
         ]);
     }
 
-    public function getCheckOutData(int $cartId, $addressCountry): string
+    public function getCheckOutData(?int $cartId, $addressCountry): string
     {
-        $cart = CartQuery::create()->findPk($cartId);
-
-        if (!$cart) {
+        if (!$cartId || !$cart = CartQuery::create()->findPk($cartId)) {
             return json_encode([]);
         }
 
