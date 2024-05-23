@@ -359,8 +359,10 @@ class GoogleTagService
 
         foreach ($products as $orderProduct) {
             $pse = ProductSaleElementsQuery::create()->findPk($orderProduct->getProductSaleElementsId());
-            $product = $pse->getProduct();
-            $items[] = $this->getProductItem($product, $lang, $currency, $pse, $orderProduct->getQuantity(), false, true, $country);
+            if($pse){
+                $product = $pse->getProduct();
+                $items[] = $this->getProductItem($product, $lang, $currency, $pse, $orderProduct->getQuantity(), false, true, $country);
+            }
         }
 
         return $items;
