@@ -4,6 +4,7 @@ namespace GoogleTagManager\Listener;
 
 use GoogleTagManager\GoogleTagManager;
 use GoogleTagManager\Service\GoogleTagService;
+use Propel\Runtime\Exception\PropelException;
 use ShortCode\Event\ShortCodeEvent;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\HttpFoundation\RequestStack;
@@ -15,13 +16,12 @@ use Thelia\Core\Event\TheliaEvents;
 class GoogleTagListener implements EventSubscriberInterface
 {
     public function __construct(
-        private GoogleTagService $googleTagService,
-        private RequestStack     $requestStack
-    )
-    {
+        protected GoogleTagService $googleTagService,
+        protected RequestStack     $requestStack
+    ) {
     }
 
-    public static function getSubscribedEvents()
+    public static function getSubscribedEvents(): array
     {
         return [
             GoogleTagManager::GOOGLE_TAG_VIEW_LIST_ITEM => ['getViewListItem', 128],
@@ -35,7 +35,10 @@ class GoogleTagListener implements EventSubscriberInterface
         ];
     }
 
-    public function getViewListItem(ShortCodeEvent $event)
+    /**
+     * @throws \JsonException|PropelException
+     */
+    public function getViewListItem(ShortCodeEvent $event): void
     {
         $session = $this->requestStack->getSession();
 
@@ -50,12 +53,15 @@ class GoogleTagListener implements EventSubscriberInterface
             ]
         ];
 
-        $event->setResult(json_encode($result));
+        $event->setResult(json_encode($result, JSON_THROW_ON_ERROR));
 
         $session->set(GoogleTagManager::GOOGLE_TAG_VIEW_LIST_ITEM, null);
     }
 
-    public function getViewItem(ShortCodeEvent $event)
+    /**
+     * @throws \JsonException|PropelException
+     */
+    public function getViewItem(ShortCodeEvent $event): void
     {
         $session = $this->requestStack->getSession();
 
@@ -70,18 +76,18 @@ class GoogleTagListener implements EventSubscriberInterface
             ]
         ];
 
-        $event->setResult(json_encode($result));
+        $event->setResult(json_encode($result, JSON_THROW_ON_ERROR));
 
         $session->set(GoogleTagManager::GOOGLE_TAG_VIEW_ITEM, null);
     }
 
-    public function trackProducts(LoopExtendsParseResultsEvent $event)
+    public function trackProducts(LoopExtendsParseResultsEvent $event): void
     {
         $products = [];
         $request = $this->requestStack->getCurrentRequest();
-        $session = $request->getSession();
+        $session = $request?->getSession();
 
-        if (!in_array($request->get('_view'), ['product', 'category', 'brand', 'search'])) {
+        if (!in_array($request?->get('_view'), ['product', 'category', 'brand', 'search'])) {
             $session->set(GoogleTagManager::GOOGLE_TAG_VIEW_LIST_ITEM, null);
             return;
         }
@@ -93,12 +99,12 @@ class GoogleTagListener implements EventSubscriberInterface
         $session->set(GoogleTagManager::GOOGLE_TAG_VIEW_LIST_ITEM, $products);
     }
 
-    public function triggerRegisterEvent(CustomerCreateOrUpdateEvent $event)
+    public function triggerRegisterEvent(CustomerCreateOrUpdateEvent $event): void
     {
         $this->requestStack->getSession()->set(GoogleTagManager::GOOGLE_TAG_TRIGGER_LOGIN, 'account creation');
     }
 
-    public function triggerLoginEvent(CustomerLoginEvent $event)
+    public function triggerLoginEvent(CustomerLoginEvent $event): void
     {
         if ($this->requestStack->getSession()->get(GoogleTagManager::GOOGLE_TAG_TRIGGER_LOGIN) !== "account creation") {
             $this->requestStack->getSession()->set(GoogleTagManager::GOOGLE_TAG_TRIGGER_LOGIN, 'account authentication');

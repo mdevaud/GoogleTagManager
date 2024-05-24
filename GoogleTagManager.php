@@ -13,6 +13,7 @@
 namespace GoogleTagManager;
 
 use Propel\Runtime\Connection\ConnectionInterface;
+use Propel\Runtime\Exception\PropelException;
 use ShortCode\ShortCode;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ServicesConfigurator;
 use Thelia\Module\BaseModule;
@@ -20,13 +21,16 @@ use Thelia\Module\BaseModule;
 class GoogleTagManager extends BaseModule
 {
     /** @var string */
-    const DOMAIN_NAME = 'googletagmanager';
+    public const DOMAIN_NAME = 'googletagmanager';
+    public const GOOGLE_TAG_MANAGER_GMT_ID_CONFIG_KEY = 'googletagmanager_gtmId';
 
-    const GOOGLE_TAG_VIEW_CART = 'google_tag_view_cart';
-    const GOOGLE_TAG_VIEW_ITEM = 'google_tag_view_item';
-    const GOOGLE_TAG_VIEW_LIST_ITEM = 'google_tag_view_list_item';
-    const GOOGLE_TAG_TRIGGER_LOGIN = 'google_tag_trigger_login';
+    public const GOOGLE_TAG_VIEW_ITEM = 'google_tag_view_item';
+    public const GOOGLE_TAG_VIEW_LIST_ITEM = 'google_tag_view_list_item';
+    public const GOOGLE_TAG_TRIGGER_LOGIN = 'google_tag_trigger_login';
 
+    /**
+     * @throws PropelException
+     */
     public function postActivation(ConnectionInterface $con = null): void
     {
         ShortCode::createNewShortCodeIfNotExist(self::GOOGLE_TAG_VIEW_LIST_ITEM, self::GOOGLE_TAG_VIEW_LIST_ITEM);
@@ -39,9 +43,8 @@ class GoogleTagManager extends BaseModule
     public static function configureServices(ServicesConfigurator $servicesConfigurator): void
     {
         $servicesConfigurator->load(self::getModuleCode().'\\', __DIR__)
-            ->exclude([THELIA_MODULE_DIR.ucfirst(self::getModuleCode()).'/I18n/*'])
-            ->autowire(true)
-            ->autoconfigure(true);
+            ->exclude([THELIA_MODULE_DIR . ucfirst(self::getModuleCode()). "/I18n/*"])
+            ->autowire()
+            ->autoconfigure();
     }
-
 }

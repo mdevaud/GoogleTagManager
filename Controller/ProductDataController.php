@@ -3,7 +3,10 @@
 namespace GoogleTagManager\Controller;
 
 use GoogleTagManager\Service\GoogleTagService;
+use Propel\Runtime\Exception\PropelException;
+use JsonException;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\Routing\Attribute\Route;
 use Thelia\Controller\Front\BaseFrontController;
 use Thelia\Core\HttpFoundation\JsonResponse;
 use Thelia\Model\Base\CurrencyQuery;
@@ -11,19 +14,24 @@ use Thelia\Model\Base\RewritingUrlQuery;
 use Thelia\Model\Currency;
 use Thelia\Model\Lang;
 use Thelia\Model\ProductQuery;
-use Thelia\Model\ProductSaleElements;
 use Thelia\Model\ProductSaleElementsQuery;
 
+#[Route('/googletagmanager', name: 'googletagmanager_product_data_')]
 class ProductDataController extends BaseFrontController
 {
-    public function getProductDataWithUrl(Request $request, GoogleTagService $googleTagService)
+    /**
+     * @throws JsonException
+     * @throws PropelException
+     */
+    #[Route('/getItem', name: 'get_item', methods: ['POST'])]
+    public function getProductDataWithUrl(Request $request, GoogleTagService $googleTagService): JsonResponse
     {
-        $requestContent = json_decode($request->getContent(), true);
+        $requestContent = json_decode($request->getContent(), true, 512, JSON_THROW_ON_ERROR);
         $productUrl = parse_url($requestContent['productUrl']);
         $result = [];
 
         if (!isset($productUrl['path'])) {
-            return new JsonResponse(json_encode($result));
+            return new JsonResponse(json_encode($result, JSON_THROW_ON_ERROR));
         }
 
         $rewriteUrl = RewritingUrlQuery::create()
@@ -45,16 +53,21 @@ class ProductDataController extends BaseFrontController
             $result = $googleTagService->getProductItem($product, $lang, $currency);
         }
 
-        return new JsonResponse(json_encode([$result]));
+        return new JsonResponse(json_encode([$result], JSON_THROW_ON_ERROR));
     }
 
-    public function getCartItem(Request $request, GoogleTagService $googleTagService)
+    /**
+     * @throws PropelException
+     * @throws JsonException
+     */
+    #[Route('/getCartItem', name: 'get_cart_item', methods: ['POST'])]
+    public function getCartItem(Request $request, GoogleTagService $googleTagService): JsonResponse
     {
-        $requestContent = json_decode($request->getContent(), true);
+        $requestContent = json_decode($request->getContent(), true, 512, JSON_THROW_ON_ERROR);
         $result = [];
 
-        if (!isset($requestContent['pseId']) || !isset($requestContent['quantity'])) {
-            return new JsonResponse(json_encode($result));
+        if (!isset($requestContent['pseId'], $requestContent['quantity'])) {
+            return new JsonResponse(json_encode($result, JSON_THROW_ON_ERROR));
         }
 
         $pseId = $requestContent['pseId'];
@@ -73,6 +86,6 @@ class ProductDataController extends BaseFrontController
 
         $result = $googleTagService->getProductItem($product, $lang, $currency, $pse, $quantity);
 
-        return new JsonResponse(json_encode([$result]));
+        return new JsonResponse(json_encode([$result], JSON_THROW_ON_ERROR));
     }
 }
