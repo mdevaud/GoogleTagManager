@@ -360,7 +360,7 @@ class GoogleTagService
         foreach ($products as $orderProduct) {
             $pse = ProductSaleElementsQuery::create()->findPk($orderProduct->getProductSaleElementsId());
             if($pse){
-                $product = $pse->getProduct();
+                $product = $orderProduct;
                 $items[] = $this->getProductItem($product, $lang, $currency, $pse, $orderProduct->getQuantity(), false, true, $country);
             }
         }
