@@ -6,15 +6,15 @@ use Propel\Runtime\Exception\PropelException;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Thelia\Core\HttpFoundation\Session\Session;
-use Thelia\Model\Base\CartQuery;
-use Thelia\Model\Base\CurrencyQuery;
 use Thelia\Model\BrandQuery;
 use Thelia\Model\CartItem;
+use Thelia\Model\CartQuery;
 use Thelia\Model\Category;
 use Thelia\Model\CategoryQuery;
 use Thelia\Model\ConfigQuery;
 use Thelia\Model\Country;
 use Thelia\Model\Currency;
+use Thelia\Model\CurrencyQuery;
 use Thelia\Model\Customer;
 use Thelia\Model\Lang;
 use Thelia\Model\Order;
@@ -23,7 +23,6 @@ use Thelia\Model\OrderQuery;
 use Thelia\Model\Product;
 use Thelia\Model\ProductQuery;
 use Thelia\Model\ProductSaleElements;
-use Thelia\Model\ProductSaleElementsQuery;
 use Thelia\TaxEngine\Calculator;
 use Thelia\TaxEngine\TaxEngine;
 
@@ -158,6 +157,69 @@ class GoogleTagService
             if (!empty($attributes)) {
                 $item['item_variant'] = $attributes;
             }
+        }
+
+        return $item;
+    }
+
+    /**
+     * @throws PropelException
+     */
+    public function getOrderProductItem(
+        OrderProduct         $orderProduct,
+        Lang                 $lang,
+        Currency             $currency,
+        $quantity = null,
+        $itemList = false,
+        $taxed = false,
+        ?Country             $country = null
+    ): array {
+        $product = ProductQuery::create()->findOneByRef($orderProduct->getProductRef());
+        $brand = $product?->getBrand();
+
+        $productPrice = $orderProduct->getWasInPromo() ? $orderProduct->getPromoPrice() : $orderProduct->getPrice();
+
+        $category = CategoryQuery::create()->findPk($product?->getDefaultCategoryId());
+        $categories = $this->getCategories($category, $lang->getLocale(), []);
+
+        if ($taxed && null !== $country) {
+            $productPrice += (float)$orderProduct->getOrderProductTaxes()->getFirst()?->getAmount();
+        }
+
+        $item = [
+            'item_id' => $product?->getId() ?? (int)$orderProduct->getProductRef(),
+            'item_name' => htmlspecialchars($orderProduct->getTitle()),
+            'item_brand' => htmlspecialchars(null !== $brand ? $brand->setLocale($lang->getLocale())->getTitle() : ConfigQuery::read('store_name')),
+            'affiliation' => htmlspecialchars(ConfigQuery::read('store_name')),
+            'price' => round($productPrice, 2),
+            'currency' => $currency->getCode(),
+            'quantity' => $quantity
+        ];
+
+        if ($itemList) {
+            $item['item_list_id'] = $this->requestStack->getCurrentRequest()?->get('_view');
+            $item['item_list_name'] = $this->requestStack->getCurrentRequest()?->get('_view');
+        }
+
+        foreach ($categories as $index => $categoryTitle) {
+            $categoryIndex = 'item_category' . $index + 1;
+            if ($index === 0) {
+                $categoryIndex = 'item_category';
+            }
+            $item[$categoryIndex] = htmlspecialchars($categoryTitle);
+        }
+
+        $attributes = '';
+        foreach ($combinations = $orderProduct->getOrderProductAttributeCombinations() as $combinationIndex => $attributeCombination) {
+            $attributes .= htmlspecialchars($attributeCombination->getAttributeTitle() . ': ' . $attributeCombination->getAttributeAvTitle());
+
+            if ($combinationIndex + 1 !== count($combinations->getData())) {
+                $attributes .= ', ';
+            }
+        }
+
+        if (!empty($attributes)) {
+            $item['item_variant'] = $attributes;
         }
 
         return $item;
@@ -391,11 +453,7 @@ class GoogleTagService
         $items = [];
 
         foreach ($products as $orderProduct) {
-            $pse = ProductSaleElementsQuery::create()->findPk($orderProduct->getProductSaleElementsId());
-            if($pse) {
-                $product = ProductQuery::create()->findOneByRef($orderProduct->getProductRef());
-                $items[] = $this->getProductItem($product, $lang, $currency, $pse, $orderProduct->getQuantity(), false, true, $country);
-            }
+            $items[] = $this->getOrderProductItem($orderProduct, $lang, $currency, $orderProduct->getQuantity(), false, true, $country);
         }
 
         return $items;
