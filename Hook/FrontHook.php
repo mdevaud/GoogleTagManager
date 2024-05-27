@@ -16,14 +16,16 @@ namespace GoogleTagManager\Hook;
 
 use GoogleTagManager\GoogleTagManager;
 use GoogleTagManager\Service\GoogleTagService;
+use Propel\Runtime\Exception\PropelException;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Thelia\Core\Event\Hook\HookRenderEvent;
 use Thelia\Core\Hook\BaseHook;
 use Thelia\Core\HttpFoundation\Session\Session;
-use Thelia\Model\AddressQuery;
+use Thelia\Core\Template\Assets\AssetResolverInterface;
 use Thelia\Model\LangQuery;
 use Thelia\TaxEngine\TaxEngine;
+use TheliaSmarty\Template\SmartyParser;
 
 /**
  * Class FrontHook
@@ -33,25 +35,31 @@ use Thelia\TaxEngine\TaxEngine;
 class FrontHook extends BaseHook
 {
     public function __construct(
-        private GoogleTagService $googleTagService,
-        private EventDispatcherInterface $eventDispatcher,
-        private TaxEngine $taxEngine,
-        private RequestStack $requestStack
+        SmartyParser $parser,
+        AssetResolverInterface $resolver,
+        private readonly GoogleTagService         $googleTagService,
+        private readonly EventDispatcherInterface $eventDispatcher,
+        private readonly TaxEngine                $taxEngine,
+        private readonly RequestStack             $requestStack,
     ) {
-        parent::__construct(null, null, $eventDispatcher);
+        parent::__construct($parser, $resolver, $eventDispatcher);
     }
 
-    public function onMainHeadTop(HookRenderEvent $event)
+    /**
+     * @throws \JsonException
+     * @throws PropelException
+     */
+    public function onMainHeadTop(HookRenderEvent $event): void
     {
         $request = $this->requestStack->getCurrentRequest();
 
         /** @var Session $session */
-        $session = $request->getSession();
+        $session = $request?->getSession();
 
-        $gtmId = GoogleTagManager::getConfigValue('googletagmanager_gtmId');
+        $gtmId = GoogleTagManager::getConfigValue(GoogleTagManager::GOOGLE_TAG_MANAGER_GMT_ID_CONFIG_KEY);
 
-        if ("" != $gtmId) {
-            $view = $request->get('_view');
+        if ("" !== $gtmId) {
+            $view = $request?->get('_view');
 
             $event->add($this->render('datalayer/thelia-page-view.html', ['data' => $this->googleTagService->getTheliaPageViewParameters()]));
 
@@ -72,19 +80,19 @@ class FrontHook extends BaseHook
 
             if ($view === 'order-delivery') {
                 /** @var Session $session */
-                $session = $request->getSession();
+                $session = $request?->getSession();
                 $cart = $session->getSessionCart($this->eventDispatcher);
 
                 $event->add($this->render('datalayer/thelia-page-view.html', [
-                    'data' => $this->googleTagService->getCartData($cart->getId(), $this->taxEngine->getDeliveryCountry())
+                    'data' => $this->googleTagService->getCartData($cart?->getId(), $this->taxEngine->getDeliveryCountry())
                 ]));
 
                 $event->add($this->render('datalayer/thelia-page-view.html', [
-                    'data' => $this->googleTagService->getCheckOutData($cart->getId(), $this->taxEngine->getDeliveryCountry())
+                    'data' => $this->googleTagService->getCheckOutData($cart?->getId(), $this->taxEngine->getDeliveryCountry())
                 ]));
             }
 
-            if ($view === 'order-placed' && $orderId = $request->get('order_id')) {
+            if ($view === 'order-placed' && $orderId = $request?->get('order_id')) {
                 $event->add($this->render('datalayer/thelia-page-view.html', [
                     'data' => $this->googleTagService->getPurchaseData($orderId)
                 ]));
@@ -110,9 +118,9 @@ class FrontHook extends BaseHook
         }
     }
 
-    public function onMainBodyTop(HookRenderEvent $event)
+    public function onMainBodyTop(HookRenderEvent $event): void
     {
-        if ($value = GoogleTagManager::getConfigValue('googletagmanager_gtmId')) {
+        if ($value = GoogleTagManager::getConfigValue(GoogleTagManager::GOOGLE_TAG_MANAGER_GMT_ID_CONFIG_KEY)) {
             $event->add(
                 "<!-- Google Tag Manager (noscript) -->" .
                     "<noscript><iframe src='https://www.googletagmanager.com/ns.html?id=" . $value . "' " .
@@ -122,30 +130,60 @@ class FrontHook extends BaseHook
         }
     }
 
-    public function onMainJsInit(HookRenderEvent $event)
+    public function onMainJsInit(HookRenderEvent $event): void
     {
-        $view = $this->requestStack->getCurrentRequest()->get('_view');
+        $view = $this->requestStack->getCurrentRequest()?->get('_view');
 
         if (in_array($view, ['category', 'brand', 'search'])) {
             $event->add($this->render('datalayer/select-item.html'));
         }
 
-        //include event listener to handle add to cart event (check README)
+        //include event listener to handle adding to cart event (check README)
         $event->add($this->render('datalayer/add-to-cart.html'));
     }
 
-    public function onProductBottom(HookRenderEvent $event)
+    public function onProductBottom(HookRenderEvent $event): void
     {
         $productId = $event->getArgument('product');
-        $this->requestStack->getCurrentRequest()->getSession()->set(GoogleTagManager::GOOGLE_TAG_VIEW_ITEM, $productId);
+        $this->requestStack->getCurrentRequest()?->getSession()->set(GoogleTagManager::GOOGLE_TAG_VIEW_ITEM, $productId);
     }
 
     protected function getLang()
     {
-        $lang = $this->getRequest()->getSession()->get("thelia.current.lang");
+        $lang = $this->getRequest()->getSession()?->get("thelia.current.lang");
         if (null === $lang) {
             $lang = LangQuery::create()->filterByByDefault(1)->findOne();
         }
         return $lang;
+    }
+
+    public static function getSubscribedHooks(): array
+    {
+        return [
+            "main.head-top" => [
+                [
+                    "type" => "front",
+                    "method" => "onMainHeadTop"
+                ]
+            ],
+            "main.body-top" => [
+                [
+                    "type" => "front",
+                    "method" => "onMainBodyTop"
+                ]
+            ],
+            "main.javascript-initialization" => [
+                [
+                    "type" => "front",
+                    "method" => "onMainJsInit"
+                ]
+            ],
+            "product.bottom" => [
+                [
+                    "type" => "front",
+                    "method" => "onProductBottom"
+                ]
+            ]
+        ];
     }
 }

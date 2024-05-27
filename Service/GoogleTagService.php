@@ -2,19 +2,19 @@
 
 namespace GoogleTagManager\Service;
 
+use Propel\Runtime\Exception\PropelException;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Thelia\Core\HttpFoundation\Session\Session;
-use Thelia\Model\Base\CartQuery;
-use Thelia\Model\Base\CurrencyQuery;
 use Thelia\Model\BrandQuery;
 use Thelia\Model\CartItem;
+use Thelia\Model\CartQuery;
 use Thelia\Model\Category;
 use Thelia\Model\CategoryQuery;
 use Thelia\Model\ConfigQuery;
 use Thelia\Model\Country;
-use Thelia\Model\Coupon;
 use Thelia\Model\Currency;
+use Thelia\Model\CurrencyQuery;
 use Thelia\Model\Customer;
 use Thelia\Model\Lang;
 use Thelia\Model\Order;
@@ -23,28 +23,29 @@ use Thelia\Model\OrderQuery;
 use Thelia\Model\Product;
 use Thelia\Model\ProductQuery;
 use Thelia\Model\ProductSaleElements;
-use Thelia\Model\ProductSaleElementsQuery;
 use Thelia\TaxEngine\Calculator;
 use Thelia\TaxEngine\TaxEngine;
 
 class GoogleTagService
 {
-
     public function __construct(
-        private RequestStack $requestStack,
-        private TaxEngine $taxEngine,
-        private EventDispatcherInterface $dispatcher
-    )
-    {
+        protected RequestStack $requestStack,
+        protected TaxEngine $taxEngine,
+        protected EventDispatcherInterface $dispatcher
+    ) {
     }
 
-    public function getTheliaPageViewParameters()
+    /**
+     * @throws PropelException
+     * @throws \JsonException
+     */
+    public function getTheliaPageViewParameters(): false|string
     {
         /** @var Customer $user */
         $user = $this->requestStack->getSession()->getCustomerUser();
         $isConnected = null !== $user ? 1 : 0;
 
-        $view = $this->requestStack->getCurrentRequest()->get('_view');
+        $view = $this->requestStack->getCurrentRequest()?->get('_view');
         $pageType = $this->getPageType($view);
 
         $result = [
@@ -67,7 +68,7 @@ class GoogleTagService
             $result['google_tag_params']['ecomm_category'] = $this->getPageName($view);
         }
 
-        if (in_array($pageType, ['product'])) {
+        if ($pageType === 'product') {
             $result['google_tag_params']['ecomm_prodid'] = $this->getPageProductRef($view);
         }
 
@@ -75,20 +76,22 @@ class GoogleTagService
             $result['google_tag_params']['ecomm_totalvalue'] = $this->getOrderTotalAmount($view);
         }
 
-        return json_encode($result);
+        return json_encode($result, JSON_THROW_ON_ERROR);
     }
 
+    /**
+     * @throws PropelException
+     */
     public function getProductItem(
         Product              $product,
         Lang                 $lang,
         Currency             $currency,
         ?ProductSaleElements $pse = null,
-                             $quantity = null,
-                             $itemList = false,
-                             $taxed = false,
+        $quantity = null,
+        $itemList = false,
+        $taxed = false,
         ?Country             $country = null
-    )
-    {
+    ): array {
         $product->setLocale($lang->getLocale());
         $isDefaultPse = false;
 
@@ -127,8 +130,8 @@ class GoogleTagService
         ];
 
         if ($itemList) {
-            $item['item_list_id'] = $this->requestStack->getCurrentRequest()->get('_view');
-            $item['item_list_name'] = $this->requestStack->getCurrentRequest()->get('_view');
+            $item['item_list_id'] = $this->requestStack->getCurrentRequest()?->get('_view');
+            $item['item_list_name'] = $this->requestStack->getCurrentRequest()?->get('_view');
         }
 
         foreach ($categories as $index => $categoryTitle) {
@@ -159,7 +162,73 @@ class GoogleTagService
         return $item;
     }
 
-    public function getProductItems(array $productIds = null, $itemList = false)
+    /**
+     * @throws PropelException
+     */
+    public function getOrderProductItem(
+        OrderProduct         $orderProduct,
+        Lang                 $lang,
+        Currency             $currency,
+        $quantity = null,
+        $itemList = false,
+        $taxed = false,
+        ?Country             $country = null
+    ): array {
+        $product = ProductQuery::create()->findOneByRef($orderProduct->getProductRef());
+        $brand = $product?->getBrand();
+
+        $productPrice = $orderProduct->getWasInPromo() ? $orderProduct->getPromoPrice() : $orderProduct->getPrice();
+
+        $category = CategoryQuery::create()->findPk($product?->getDefaultCategoryId());
+        $categories = $this->getCategories($category, $lang->getLocale(), []);
+
+        if ($taxed && null !== $country) {
+            $productPrice += (float)$orderProduct->getOrderProductTaxes()->getFirst()?->getAmount();
+        }
+
+        $item = [
+            'item_id' => $product?->getId() ?? (int)$orderProduct->getProductRef(),
+            'item_name' => htmlspecialchars($orderProduct->getTitle()),
+            'item_brand' => htmlspecialchars(null !== $brand ? $brand->setLocale($lang->getLocale())->getTitle() : ConfigQuery::read('store_name')),
+            'affiliation' => htmlspecialchars(ConfigQuery::read('store_name')),
+            'price' => round($productPrice, 2),
+            'currency' => $currency->getCode(),
+            'quantity' => $quantity
+        ];
+
+        if ($itemList) {
+            $item['item_list_id'] = $this->requestStack->getCurrentRequest()?->get('_view');
+            $item['item_list_name'] = $this->requestStack->getCurrentRequest()?->get('_view');
+        }
+
+        foreach ($categories as $index => $categoryTitle) {
+            $categoryIndex = 'item_category' . $index + 1;
+            if ($index === 0) {
+                $categoryIndex = 'item_category';
+            }
+            $item[$categoryIndex] = htmlspecialchars($categoryTitle);
+        }
+
+        $attributes = '';
+        foreach ($combinations = $orderProduct->getOrderProductAttributeCombinations() as $combinationIndex => $attributeCombination) {
+            $attributes .= htmlspecialchars($attributeCombination->getAttributeTitle() . ': ' . $attributeCombination->getAttributeAvTitle());
+
+            if ($combinationIndex + 1 !== count($combinations->getData())) {
+                $attributes .= ', ';
+            }
+        }
+
+        if (!empty($attributes)) {
+            $item['item_variant'] = $attributes;
+        }
+
+        return $item;
+    }
+
+    /**
+     * @throws PropelException
+     */
+    public function getProductItems(array $productIds = null, $itemList = false): array
     {
         $session = $this->requestStack->getSession();
         $products = ProductQuery::create()->filterById($productIds)->find();
@@ -178,7 +247,10 @@ class GoogleTagService
         return $items;
     }
 
-    public function getLogInData($authAction)
+    /**
+     * @throws \JsonException
+     */
+    public function getLogInData($authAction): false|string
     {
         /** @var Customer $customer */
         $customer = $this->requestStack->getSession()->getCustomerUser();
@@ -196,13 +268,17 @@ class GoogleTagService
             $result['user']['userId'] = $customer->getRef();
         }
 
-        return json_encode($result);
+        return json_encode($result, JSON_THROW_ON_ERROR);
     }
 
+    /**
+     * @throws PropelException
+     * @throws \JsonException
+     */
     public function getCartData(?int $cartId, $addressCountry): string
     {
         if (!$cartId || !$cart = CartQuery::create()->findPk($cartId)) {
-            return json_encode([]);
+            return json_encode([], JSON_THROW_ON_ERROR);
         }
 
         $items = array_map(function (CartItem $cartItem) use ($addressCountry) {
@@ -212,23 +288,27 @@ class GoogleTagService
         return json_encode([
             'event' => 'view_cart',
             'ecommerce' => [
-                'currency' => $cart->getCurrency()->getCode(),
+                'currency' => $cart->getCurrency()?->getCode(),
                 'value' => $cart->getTaxedAmount($addressCountry),
                 'items' => $items
             ]
-        ]);
+        ], JSON_THROW_ON_ERROR);
     }
 
+    /**
+     * @throws PropelException
+     * @throws \JsonException
+     */
     public function getCheckOutData(?int $cartId, $addressCountry): string
     {
         if (!$cartId || !$cart = CartQuery::create()->findPk($cartId)) {
-            return json_encode([]);
+            return json_encode([], JSON_THROW_ON_ERROR);
         }
 
         /** @var Session $session */
         $session = $this->requestStack->getSession();
 
-        $coupons = implode(',',$session->getConsumedCoupons());
+        $coupons = implode(',', $session->getConsumedCoupons());
 
         $items = array_map(function (CartItem $cartItem) use ($addressCountry) {
             return $this->getProductCartItems($cartItem, $addressCountry);
@@ -237,15 +317,19 @@ class GoogleTagService
         return json_encode([
             'event' => 'begin_checkout',
             'ecommerce' => [
-                'currency' => $cart->getCurrency()->getCode(),
+                'currency' => $cart->getCurrency()?->getCode(),
                 'value' => $cart->getTaxedAmount($addressCountry),
                 'coupon' => $coupons,
                 'items' => $items
             ]
-        ]);
+        ], JSON_THROW_ON_ERROR);
     }
 
-    public function getPaymentInfo(int $orderId)
+    /**
+     * @throws PropelException
+     * @throws \JsonException
+     */
+    public function getPaymentInfo(int $orderId): false|string|null
     {
         $order = OrderQuery::create()->findPk($orderId);
 
@@ -258,7 +342,7 @@ class GoogleTagService
 
         $currency = $session->getCurrency() ?: CurrencyQuery::create()->findOneByByDefault(1);
 
-        $coupons = implode(',',$session->getConsumedCoupons());
+        $coupons = implode(',', $session->getConsumedCoupons());
 
         $paymentType = $order->getPaymentModuleInstance()->getCode();
 
@@ -271,10 +355,14 @@ class GoogleTagService
                 'payment_type' => $paymentType,
                 'items' => $this->getOrderProductItems($order, $order->getOrderAddressRelatedByInvoiceOrderAddressId()->getCountry())
             ]
-        ]);
+        ], JSON_THROW_ON_ERROR);
     }
 
-    public function getShippingInfo(int $orderId)
+    /**
+     * @throws PropelException
+     * @throws \JsonException
+     */
+    public function getShippingInfo(int $orderId): false|string|null
     {
         $order = OrderQuery::create()->findPk($orderId);
 
@@ -287,7 +375,7 @@ class GoogleTagService
 
         $currency = $session->getCurrency() ?: CurrencyQuery::create()->findOneByByDefault(1);
 
-        $coupons = implode(',',$session->getConsumedCoupons());
+        $coupons = implode(',', $session->getConsumedCoupons());
 
         $shippingType = $order->getDeliveryModuleInstance()->getCode();
 
@@ -300,10 +388,14 @@ class GoogleTagService
                 'shipping_tier' => $shippingType,
                 'items' => $this->getOrderProductItems($order, $order->getOrderAddressRelatedByInvoiceOrderAddressId()->getCountry())
             ]
-        ]);
+        ], JSON_THROW_ON_ERROR);
     }
 
-    public function getPurchaseData(int $orderId)
+    /**
+     * @throws PropelException
+     * @throws \JsonException
+     */
+    public function getPurchaseData(int $orderId): false|string|null
     {
         $order = OrderQuery::create()->findPk($orderId);
 
@@ -328,7 +420,7 @@ class GoogleTagService
                 'value' => $order->getTotalAmount($tax, false),
                 'tax' => $tax,
                 'shipping' => $order->getPostage(),
-                'currency' => $currency->getCode(),
+                'currency' => $currency?->getCode(),
                 'affiliation' => htmlspecialchars(ConfigQuery::read('store_name')),
                 'items' => $this->getOrderProductItems($order, $invoiceAddress->getCountry())
             ],
@@ -342,10 +434,13 @@ class GoogleTagService
                     'country' => $invoiceAddress->getCountry()->getIsoalpha2()
                 ]
             ]
-        ]);
+        ], JSON_THROW_ON_ERROR);
     }
 
-    public function getOrderProductItems(Order $order, Country $country)
+    /**
+     * @throws PropelException
+     */
+    public function getOrderProductItems(Order $order, Country $country): array
     {
         $session = $this->requestStack->getSession();
         $products = $order->getOrderProducts();
@@ -358,17 +453,16 @@ class GoogleTagService
         $items = [];
 
         foreach ($products as $orderProduct) {
-            $pse = ProductSaleElementsQuery::create()->findPk($orderProduct->getProductSaleElementsId());
-            if($pse){
-                $product = $pse->getProduct();
-                $items[] = $this->getProductItem($product, $lang, $currency, $pse, $orderProduct->getQuantity(), false, true, $country);
-            }
+            $items[] = $this->getOrderProductItem($orderProduct, $lang, $currency, $orderProduct->getQuantity(), false, true, $country);
         }
 
         return $items;
     }
 
-    public function getProductCartItems(CartItem $cartItem, Country $country)
+    /**
+     * @throws PropelException
+     */
+    public function getProductCartItems(CartItem $cartItem, Country $country): array
     {
         $session = $this->requestStack->getSession();
 
@@ -394,57 +488,32 @@ class GoogleTagService
         return $categories;
     }
 
-    protected function getPageType($view)
+    protected function getPageType($view): string
     {
-        switch ($view) {
-            case 'index':
-                $pageType = 'home';
-                break;
-            case 'product':
-            case 'category':
-            case 'content':
-                $pageType = $view;
-                break;
-            case 'brand':
-                $pageType = 'category';
-                break;
-            case 'folder':
-                $pageType = 'dossier';
-                break;
-            case 'search':
-                $pageType = 'searchresults';
-                break;
-            case 'cart':
-            case 'order-delivery':
-                $pageType = 'cart';
-                break;
-            case 'order-placed':
-                $pageType = 'purchase';
-                break;
-            case 'account':
-            case 'account-orders':
-            case 'account-update':
-            case 'account-address':
-                $pageType = 'account';
-                break;
-            default :
-                $pageType = 'other';
-        }
-
-        return $pageType;
+        return match ($view) {
+            'index' => 'home',
+            'product', 'category', 'content' => $view,
+            'brand' => 'category',
+            'folder' => 'dossier',
+            'search' => 'searchresults',
+            'cart', 'order-delivery' => 'cart',
+            'order-placed' => 'purchase',
+            'account', 'account-orders', 'account-update', 'account-address' => 'account',
+            default => 'other',
+        };
     }
 
-    protected function getPageName($view)
+    protected function getPageName($view): ?string
     {
         switch ($view) {
             case 'category':
-                $pageEntity = CategoryQuery::create()->findPk($this->requestStack->getCurrentRequest()->get('category_id'));
+                $pageEntity = CategoryQuery::create()->findPk($this->requestStack->getCurrentRequest()?->get('category_id'));
                 break;
             case 'brand':
-                $pageEntity = BrandQuery::create()->findPk($this->requestStack->getCurrentRequest()->get('brand_id'));
+                $pageEntity = BrandQuery::create()->findPk($this->requestStack->getCurrentRequest()?->get('brand_id'));
                 break;
             case 'product':
-                $pageEntity = ProductQuery::create()->findPk($this->requestStack->getCurrentRequest()->get('product_id'));
+                $pageEntity = ProductQuery::create()->findPk($this->requestStack->getCurrentRequest()?->get('product_id'));
                 break;
             default:
                 return null;
@@ -452,48 +521,53 @@ class GoogleTagService
         return htmlspecialchars($pageEntity->setLocale($this->requestStack->getSession()->getLang()->getLocale())->getTitle());
     }
 
+    /**
+     * @throws PropelException
+     */
     protected function getPageProductRef($view)
     {
         switch ($view) {
-            case 'product' :
+            case 'product':
                 $product = ProductQuery::create()->findPk($this->requestStack->getCurrentRequest()->get('product_id'));
                 $productRefs = [$product->getRef()];
                 break;
 
-            case 'cart' :
-            case 'order-delivery' :
+            case 'cart':
+            case 'order-delivery':
                 $cart = $this->requestStack->getSession()->getSessionCart();
-                $productRefs = array_map(function (CartItem $item) {
+                $productRefs = array_map(static function (CartItem $item) {
                     return $item->getProduct()->getRef();
-                }, iterator_to_array($cart->getCartItems()));
+                }, iterator_to_array($cart?->getCartItems()));
                 break;
 
-            case 'order-placed' :
-                $order = OrderQuery::create()->findPk($this->requestStack->getCurrentRequest()->get('order_id'));
-                $productRefs = array_map(function (OrderProduct $item) {
+            case 'order-placed':
+                $order = OrderQuery::create()->findPk($this->requestStack->getCurrentRequest()?->get('order_id'));
+                $productRefs = array_map(static function (OrderProduct $item) {
                     return $item->getProductRef();
                 }, iterator_to_array($order->getOrderProducts()));
                 break;
 
-            default :
+            default:
                 return null;
         }
 
         return $productRefs;
     }
 
+    /**
+     * @throws PropelException
+     */
     protected function getOrderTotalAmount($view)
     {
         switch ($view) {
-            case 'cart' :
-            case 'order-delivery' :
-                return $this->requestStack->getSession()->getSessionCart($this->dispatcher)->getTaxedAmount($this->taxEngine->getDeliveryCountry());
-            case 'order-placed' :
-                $order = OrderQuery::create()->findPk($this->requestStack->getCurrentRequest()->get('order_id'));
+            case 'cart':
+            case 'order-delivery':
+                return $this->requestStack->getSession()->getSessionCart($this->dispatcher)?->getTaxedAmount($this->taxEngine->getDeliveryCountry());
+            case 'order-placed':
+                $order = OrderQuery::create()->findPk($this->requestStack->getCurrentRequest()?->get('order_id'));
                 return $order->getTotalAmount($tax, false) - $tax;
-            default :
+            default:
                 return null;
         }
     }
-
 }

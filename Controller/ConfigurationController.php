@@ -12,10 +12,11 @@
 
 namespace GoogleTagManager\Controller;
 
-
+use Exception;
+use GoogleTagManager\Form\ConfigurationForm;
 use GoogleTagManager\GoogleTagManager;
+use Symfony\Component\Routing\Attribute\Route;
 use Thelia\Controller\Admin\BaseAdminController;
-use Thelia\Core\HttpFoundation\Session\Session;
 use Thelia\Core\Security\AccessManager;
 use Thelia\Core\Security\Resource\AdminResources;
 use Thelia\Core\Translation\Translator;
@@ -25,24 +26,24 @@ use Thelia\Core\Translation\Translator;
  * @package GoogleTagManager\Controller
  * @author Tom Pradat <tpradat@openstudio.fr>
  */
-class Configuration extends BaseAdminController
+#[Route('/admin/module/googletagmanager', name: 'admin_googletagmanager_configuration_')]
+class ConfigurationController extends BaseAdminController
 {
-    public function saveAction(Session $session){
-
+    #[Route('/save', name: 'save', methods: ['POST'])]
+    public function saveAction()
+    {
         if (null !== $response = $this->checkAuth(array(AdminResources::MODULE), array('googletagmanager'), AccessManager::UPDATE)) {
             return $response;
         }
 
-        $form = $this->createForm(\GoogleTagManager\Form\Configuration::class);
-        $response=null;
+        $form = $this->createForm(ConfigurationForm::getName());
 
         try {
             $vform = $this->validateForm($form);
             $data = $vform->getData();
-            $lang = $session->get('thelia.admin.edition.lang');
 
-            GoogleTagManager::setConfigValue('googletagmanager_gtmId', $data['gtmId']);
-        } catch (\Exception $e) {
+            GoogleTagManager::setConfigValue(GoogleTagManager::GOOGLE_TAG_MANAGER_GMT_ID_CONFIG_KEY, $data['gtmId']);
+        } catch (Exception $e) {
             $this->setupFormErrorContext(
                 Translator::getInstance()->trans("Syntax error"),
                 $e->getMessage(),
