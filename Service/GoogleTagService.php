@@ -180,7 +180,7 @@ class GoogleTagService
         $productPrice = $orderProduct->getWasInPromo() ? $orderProduct->getPromoPrice() : $orderProduct->getPrice();
 
         $category = CategoryQuery::create()->findPk($product?->getDefaultCategoryId());
-        $categories = $this->getCategories($category, $lang->getLocale(), []);
+        $categories = $category ? $this->getCategories($category, $lang->getLocale(), []) : [];
 
         if ($taxed && null !== $country) {
             $productPrice += (float)$orderProduct->getOrderProductTaxes()->getFirst()?->getAmount();
